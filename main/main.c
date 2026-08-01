@@ -14,6 +14,7 @@
 #include "app_usb.h"
 #include "app_fs.h"
 #include "app_event_loop.h"
+#include "app_pwr_sw.h"
 
 
 
@@ -64,4 +65,5 @@ void app_main(void)
     app_wifi_init();
     app_mqtt_init();
     app_usb_init();
+    app_pwr_sw_init();
 }

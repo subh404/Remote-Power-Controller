@@ -5,6 +5,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/timers.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "app_pwr_sw.h"
@@ -13,9 +14,10 @@
 
 static const char *TAG = "app_pwr_sw";
 
-ESP_EVENT_DECLARE_BASE(APP_POWER_SWITCH_OUT_EVENT);    
+ESP_EVENT_DEFINE_BASE(APP_POWER_SWITCH_OUT_EVENT);    
 
 static QueueHandle_t pwr_sw_evt_queue = NULL;
+static TimerHandle_t debounce_timer = NULL;
 
 #define CONFIG_GPIO_OUTPUT_IO_7    7
 #define CONFIG_GPIO_INPUT_IO_13    13
@@ -23,17 +25,21 @@ static QueueHandle_t pwr_sw_evt_queue = NULL;
 
 static void IRAM_ATTR gpio_isr_handler(void* arg)
 {
+    BaseType_t high_task_wakeup = pdFALSE;
+    if(debounce_timer != NULL) {
+        xTimerResetFromISR(debounce_timer, &high_task_wakeup);
+    }
+}
+
+static void debounce_timer_callback(TimerHandle_t xTimer)
+{
+    // Read the GPIO level after debounce time
+    int gpio_level = gpio_get_level(CONFIG_GPIO_INPUT_IO_13);
     struct pwr_sw_event_t evt;
     evt.gpio_num = CONFIG_GPIO_OUTPUT_IO_7;
-    /* Event is being created for map value of gp13 to gp7 */
-    evt.req_level = gpio_get_level((uint32_t) arg);
+    evt.req_level = gpio_level ? 0 : 1; // Invert the level for toggle
     evt.toggle_time = 0; // Set the appropriate toggle time if needed
-    xQueueSendFromISR(pwr_sw_evt_queue, &evt, NULL);
-
-    /* TODO: Write a debounce logic */
-    // start a timer with a delay of 50ms , and the debounce state 
-    // If the state changes within the 50ms , then reset the timer and wait for another 
-    // If the pin was stable for 50ms , then send the event to the queue
+    xQueueSend(pwr_sw_evt_queue, &evt, portMAX_DELAY);
 }
 
 static void pwr_sw_task(void* arg)
@@ -43,9 +49,9 @@ static void pwr_sw_task(void* arg)
         if (xQueueReceive(pwr_sw_evt_queue, &evt, portMAX_DELAY)) {
             printf("GPIO[%d] intr, val: %d\n", evt.gpio_num, evt.req_level);
             if(evt.toggle_time > 0) {
-                gpio_set_level(evt.gpio_num, evt.req_level);
+                gpio_set_level(evt.gpio_num, 1);
                 vTaskDelay(pdMS_TO_TICKS(evt.toggle_time));
-                gpio_set_level(evt.gpio_num, !evt.req_level);
+                gpio_set_level(evt.gpio_num, 0);
             } else {
                 gpio_set_level(evt.gpio_num, evt.req_level);
             }
@@ -71,10 +77,9 @@ static void app_pwr_sw_event_handler(void *handler_args, esp_event_base_t base, 
         ESP_LOGI(TAG, "APP_POWER_SWITCH_OUT_EVENT_TOGGLE");
         if(event_data != NULL) {
             evt.toggle_time = *((uint32_t*)event_data);
-            evt.req_level = 1;
         } else {
             ESP_LOGW(TAG, "APP_POWER_SWITCH_OUT_EVENT_TOGGLE event_data is NULL");
-             evt.toggle_time = 500; // Default toggle time in milliseconds
+            evt.toggle_time = 500; // Default toggle time in milliseconds
         }
         break;
     default:
@@ -99,18 +104,31 @@ void app_pwr_sw_init(void) {
 
 
     /* Configure the Input pin from power button */
-    io_conf.intr_type = GPIO_INTR_POSEDGE;
+    io_conf.intr_type = GPIO_INTR_ANYEDGE;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pin_bit_mask = (1ULL<<CONFIG_GPIO_INPUT_IO_13);
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     io_conf.pull_up_en = GPIO_PULLUP_ENABLE;
     gpio_config(&io_conf);
 
+    /* Set GPIO 7 to LOW */
+    gpio_set_level(CONFIG_GPIO_OUTPUT_IO_7, 0);
+
+    /* set power switch level to high as pulled up externally */
+    power_switch_state = 1;
+    last_power_switch_state = 1;
+    
     //create a queue to handle gpio event from isr
     pwr_sw_evt_queue = xQueueCreate(10, sizeof(struct pwr_sw_event_t));
     //start gpio task
     xTaskCreate(pwr_sw_task, "pwr_sw_task", 2048, NULL, 10, NULL);
 
+    // Create a debounce timer with a period of 50ms
+    debounce_timer = xTimerCreate("debounce_timer", pdMS_TO_TICKS(50), pdFALSE, (void*)0, debounce_timer_callback);
+    if(debounce_timer != NULL) {
+        xTimerStart(debounce_timer, 0);
+    }
+    
     //install gpio isr service
     gpio_install_isr_service(0);
     //hook isr handler for specific gpio pin

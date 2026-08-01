@@ -15,8 +15,9 @@
 #include "app_event_source.h"
 #include "app_event_loop.h"
 #include "mfg_data.h"
+#include "app_pwr_sw.h"
 
-
+#define MQTT_BASE_TOPIC "/topic/device/"
 /* Event source task related definitions */
 ESP_EVENT_DEFINE_BASE(APP_MQTT_EVENT);
 
@@ -29,6 +30,44 @@ static void log_error_if_nonzero(const char *message, int error_code)
     }
 }
 
+static void subscribe_to_topics(esp_mqtt_client_handle_t client)
+{
+    char *device_id = mfg_data_get_device_id();
+    if(device_id == NULL) {
+        ESP_LOGE(TAG, "Device ID is not configured. Please configure the device ID in the manufacturing data.");
+        return;
+    }
+    char dev_topic[256];
+    
+    /* Power sw toggle topic */
+    memset(dev_topic, 0, sizeof(dev_topic));
+    snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/pwr_sw_toggle", device_id);
+    
+    int msg_id = esp_mqtt_client_subscribe(client, dev_topic, 0);
+    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
+    /* USB-HID key stroke topi*/
+    memset(dev_topic, 0, sizeof(dev_topic));
+    snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/usb_hid_keystroke", device_id);
+    msg_id = esp_mqtt_client_subscribe(client, dev_topic, 0);
+    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
+    /* PC unlock  topic */
+    memset(dev_topic, 0, sizeof(dev_topic));
+    snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/pc_unlock", device_id);
+    msg_id = esp_mqtt_client_subscribe(client, dev_topic, 0);
+    ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+
+}
+
+static void power_switch_toggle_handler(bool is_true)
+{
+    if(is_true) {
+      ESP_LOGI(TAG, "Power switch toggle event received. Posting event to event loop.");  
+      app_event_loop_post(APP_POWER_SWITCH_OUT_EVENT, APP_POWER_SWITCH_OUT_EVENT_TOGGLE, NULL, 0, portMAX_DELAY);
+    }
+}
+
 static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32, base, event_id);
@@ -38,11 +77,7 @@ static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, in
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/qos0", 0);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
-
-        msg_id = esp_mqtt_client_subscribe(client, "/topic/toggle", 0);
-        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
+        subscribe_to_topics(client);
 
         break;
     case MQTT_EVENT_DISCONNECTED:
@@ -51,8 +86,6 @@ static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, in
 
     case MQTT_EVENT_SUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_SUBSCRIBED, msg_id=%d, return code=0x%02x ", event->msg_id, (uint8_t)*event->data);
-        msg_id = esp_mqtt_client_publish(client, "/topic/qos0", "data", 0, 0, 0);
-        ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_UNSUBSCRIBED:
         ESP_LOGI(TAG, "MQTT_EVENT_UNSUBSCRIBED, msg_id=%d", event->msg_id);
@@ -64,6 +97,40 @@ static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, in
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
+        char* device_id = mfg_data_get_device_id();
+        if(device_id == NULL) {
+            ESP_LOGE(TAG, "Device ID is not configured. Please configure the device ID in the manufacturing data.");
+            return;
+        }
+
+        /* Check if the topic is one of the subscribed topics */
+        char dev_topic[256];
+
+        /* Power sw toggle topic */
+        memset(dev_topic, 0, sizeof(dev_topic));
+        snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/pwr_sw_toggle", device_id);
+        if (strncmp(event->topic, dev_topic, event->topic_len) == 0) {
+            ESP_LOGI(TAG, "Received message for topic: %.*s", event->topic_len, event->topic);
+            if (event->data_len > 0 && strncmp(event->data, "true", event->data_len) == 0) {
+                power_switch_toggle_handler(true);
+            }
+            return;
+        }
+
+        memset(dev_topic, 0, sizeof(dev_topic));
+        snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/pc_unlock", device_id);
+
+        if (strncmp(event->topic, dev_topic, event->topic_len) == 0) {
+            ESP_LOGI(TAG, "Received message for topic: %.*s", event->topic_len, event->topic);
+            return;
+        }
+
+        memset(dev_topic, 0, sizeof(dev_topic));
+        snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/usb_hid_keystroke", device_id);
+        if (strncmp(event->topic, dev_topic, event->topic_len) == 0 && event->data_len > 0) {
+            ESP_LOGI(TAG, "Received message for topic: %.*s", event->topic_len, event->topic);
+            return;
+        }
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -116,7 +183,7 @@ static void mqtt_connection_init(void)
             .authentication.key = (const char *)client_key,
         },
     };
-    
+
     ESP_LOGI(TAG, "[APP] Free memory: %" PRIu32 " bytes", esp_get_free_heap_size());
     esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
