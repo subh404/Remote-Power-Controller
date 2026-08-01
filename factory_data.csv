@@ -1,0 +1,7 @@
+key,type,encoding,value
+mfg_ns,namespace,,
+device_id,data,string,ESP32_PROD_001
+server,data,string,mqtts:test.mosquitto.com:1883
+client_cert,file,string,esp32_mqtt.crt
+private_key,file,string,esp32_mqtt.key
+ca_cert,file,string,ca.crt

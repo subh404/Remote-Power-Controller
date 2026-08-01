@@ -1,0 +1,29 @@
+#ifndef _APP_EVENT_SOURCE_H_
+#define _APP_EVENT_SOURCE_H_
+#include "esp_event.h"
+
+/* Events for POWER switch out */
+ESP_EVENT_DECLARE_BASE(APP_POWER_SWITCH_OUT_EVENT);         
+
+enum {
+    APP_POWER_SWITCH_OUT_EVENT_HIGH = 0,
+    APP_POWER_SWITCH_OUT_EVENT_LOW = 1,
+    APP_POWER_SWITCH_OUT_EVENT_TOGGLE = 2,
+};
+
+/* Events for MQTT */
+ESP_EVENT_DECLARE_BASE(APP_MQTT_EVENT); 
+
+enum {
+    APP_MQTT_EVENT_PUBLISHED = 0,
+};
+
+/* Events for HID */
+ESP_EVENT_DECLARE_BASE(APP_HID_EVENT);
+
+enum {
+    APP_HID_EVENT_GENERIC_KEYSTROKE = 0,
+    APP_HID_EVENT_PRESS_ENTER = 1,
+};
+
+#endif /* _APP_EVENT_SOURCE_H_ */

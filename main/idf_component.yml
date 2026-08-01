@@ -1,0 +1,5 @@
+dependencies:
+  espressif/mqtt: "*"
+  espressif/esp_tinyusb:
+    version: "^2.0.1~1"
+  espressif/cjson: "^1.7.19"
