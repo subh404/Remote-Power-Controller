@@ -8,6 +8,7 @@
 
 #include "app_event_source.h"
 #include "app_event_loop.h"
+#include "app_mqtt.h"
 
 
 static const char *TAG = "app_usb_hid";
@@ -52,6 +53,61 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     ESP_LOGI(TAG, "Received SET_REPORT request: report_id=%d, report_type=%d, bufsize=%d", report_id, report_type, bufsize);
 }
 
+static void generic_keystroke_handler(char *buffer)
+{
+    if (buffer == NULL || strlen(buffer) == 0) {
+        ESP_LOGW(TAG, "Received empty keystroke report");
+        return;
+    }
+
+    /* Convert hex encoded string to uint8_t array */
+    size_t bufsize = strlen(buffer);
+    ESP_LOGI(TAG, "Received keystroke report: %s, length: %zu", buffer, bufsize);
+    uint8_t* keyarray = (uint8_t*)malloc(bufsize / 2);
+    if (keyarray == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for keyarray");
+        return;
+    }
+
+    for(int i = 0; i < bufsize / 2; i++) {
+        sscanf((char*)&buffer[i * 2], "%2hhx", &keyarray[i]);
+    }
+
+    int i = 0;
+    int k = 0;
+    uint8_t keycode[6] = {0, 0, 0, 0, 0, 0};
+    while( i < bufsize / 2) {
+        ESP_LOGI(TAG, "Keystroke byte %d: 0x%02X", i, keyarray[i]);
+        if (keyarray[i] == 0xFF)
+        {
+            i++;
+            continue;
+        }
+
+        if (k < 6) {
+            keycode[k++] = keyarray[i];
+        } else {
+            ESP_LOGW(TAG, "wrong format");
+            return ;
+        }
+        
+        if(i+1 < bufsize/2 && keyarray[i+1] == 0xFF) {
+            i++;
+            continue;
+        }
+
+        tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, keycode);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        i++;
+        k = 0;
+        memset(keycode, 0, sizeof(keycode));
+    }
+
+    free(keyarray);
+}
+
 
 /* Application event handler for usb hid */
 void app_usb_hid_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
@@ -60,9 +116,17 @@ void app_usb_hid_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch (event_id) {
     case APP_HID_EVENT_GENERIC_KEYSTROKE:
         ESP_LOGI(TAG, "APP_HID_EVENT_GENERIC_KEYSTROKE");
+        char *buffer = app_mqtt_get_keystroke_data();
+        generic_keystroke_handler(buffer);
+        app_mqtt_clear_keystroke_data();
         break;
     case APP_HID_EVENT_PRESS_ENTER:
         ESP_LOGI(TAG, "APP_HID_EVENT_PRESS_ENTER");
+        char *enter_keycode = "28";
+        generic_keystroke_handler(enter_keycode);
+        break;
+    case APP_HID_EVENT_PRESS_PC_UNLOCK:
+        ESP_LOGI(TAG, "APP_HID_EVENT_PRESS_PC_UNLOCK");
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event_id);

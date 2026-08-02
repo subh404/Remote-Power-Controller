@@ -113,10 +113,6 @@ void app_pwr_sw_init(void) {
 
     /* Set GPIO 7 to LOW */
     gpio_set_level(CONFIG_GPIO_OUTPUT_IO_7, 0);
-
-    /* set power switch level to high as pulled up externally */
-    power_switch_state = 1;
-    last_power_switch_state = 1;
     
     //create a queue to handle gpio event from isr
     pwr_sw_evt_queue = xQueueCreate(10, sizeof(struct pwr_sw_event_t));

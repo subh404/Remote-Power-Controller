@@ -22,6 +22,7 @@
 ESP_EVENT_DEFINE_BASE(APP_MQTT_EVENT);
 
 static const char *TAG = "mqtt_client";
+static char* keystroke_data = NULL;
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -128,7 +129,22 @@ static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, in
         memset(dev_topic, 0, sizeof(dev_topic));
         snprintf(dev_topic, sizeof(dev_topic), MQTT_BASE_TOPIC "%s/usb_hid_keystroke", device_id);
         if (strncmp(event->topic, dev_topic, event->topic_len) == 0 && event->data_len > 0) {
-            ESP_LOGI(TAG, "Received message for topic: %.*s", event->topic_len, event->topic);
+            ESP_LOGI(TAG, "Received message for topic: %.*s , len: %d", event->topic_len, event->topic, event->data_len);
+            
+            if (keystroke_data) {
+               ESP_LOGI(TAG, "Last Keystroke is not consumed yet");
+               return;
+            }
+
+            keystroke_data = (char *)malloc(event->data_len+1);
+            if (keystroke_data == NULL) {
+                ESP_LOGE(TAG, "Failed to allocate memory for keystroke_data");
+                return;
+            }
+            memset(keystroke_data, 0, event->data_len+1);
+            memcpy(keystroke_data, event->data, event->data_len);
+
+            app_event_loop_post(APP_HID_EVENT, APP_HID_EVENT_GENERIC_KEYSTROKE,0,0 , 0);
             return;
         }
         break;
@@ -203,6 +219,19 @@ static void mqtt_netif_event_handler(void *handler_args, esp_event_base_t base, 
     default:
         ESP_LOGI(TAG, "Other event id:%d", event_id);
         break;
+    }
+}
+
+char* app_mqtt_get_keystroke_data(void)
+{
+    return keystroke_data;
+}
+
+void app_mqtt_clear_keystroke_data(void)
+{
+    if (keystroke_data) {
+        free(keystroke_data);
+        keystroke_data = NULL;
     }
 }
 
