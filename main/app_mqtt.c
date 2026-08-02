@@ -16,6 +16,7 @@
 #include "app_event_loop.h"
 #include "mfg_data.h"
 #include "app_pwr_sw.h"
+#include "provision_data.h"
 
 #define MQTT_BASE_TOPIC "/topic/device/"
 /* Event source task related definitions */
@@ -23,6 +24,8 @@ ESP_EVENT_DEFINE_BASE(APP_MQTT_EVENT);
 
 static const char *TAG = "mqtt_client";
 static char* keystroke_data = NULL;
+
+static esp_mqtt_client_handle_t mqtt_client = NULL;
 
 static void log_error_if_nonzero(const char *message, int error_code)
 {
@@ -61,6 +64,30 @@ static void subscribe_to_topics(esp_mqtt_client_handle_t client)
 
 }
 
+static void publish_provision_data(esp_mqtt_client_handle_t client)
+{
+    char *device_id = mfg_data_get_device_id();
+    if(device_id == NULL) {
+        ESP_LOGE(TAG, "Device ID is not configured. Please configure the device ID in the manufacturing data.");
+        return;
+    }
+    char *hostname = provision_data_get_hostname();
+    if(hostname == NULL) {
+        ESP_LOGE(TAG, "Hostname is not configured. Please configure the hostname in the provision data.");
+        return;
+    }
+
+    struct mqtt_event_loop_pub_data_t pub_data;
+    /* Publish device id to topic */
+    memset(pub_data.topic, 0, sizeof(pub_data.topic));
+    snprintf(pub_data.topic, sizeof(pub_data.topic), MQTT_BASE_TOPIC "%s/provision_data", device_id);
+    memset(pub_data.data, 0, sizeof(pub_data.data));
+    snprintf(pub_data.data, sizeof(pub_data.data), "{\"device_id\":\"%s\",\"hostname\":\"%s\"}", device_id, hostname);
+    pub_data.qos = 0;
+    pub_data.retain = false;
+    app_event_loop_post(APP_MQTT_EVENT, APP_MQTT_EVENT_PUBLISHED, &pub_data, sizeof(pub_data), 0);
+}
+
 static void power_switch_toggle_handler(bool is_true)
 {
     if(is_true) {
@@ -79,7 +106,7 @@ static void app_mqtt_event_handler(void *handler_args, esp_event_base_t base, in
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         subscribe_to_topics(client);
-
+        publish_provision_data(client);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -171,6 +198,14 @@ static void app_mqtt_event_loop_handler(void *handler_args, esp_event_base_t bas
     switch (event_id) {
     case APP_MQTT_EVENT_PUBLISHED:
         ESP_LOGI(TAG, "APP_MQTT_EVENT");
+        if(mqtt_client != NULL) {
+            if(event_data != NULL) {
+                struct mqtt_event_loop_pub_data_t *pub_data = (struct mqtt_event_loop_pub_data_t *)event_data;
+                esp_mqtt_client_publish(mqtt_client, pub_data->topic, pub_data->data, 0, pub_data->qos, pub_data->retain);
+            }
+        } else {
+            ESP_LOGI(TAG, "MQTT client is not connected");
+        }
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event_id);
@@ -201,10 +236,14 @@ static void mqtt_connection_init(void)
     };
 
     ESP_LOGI(TAG, "[APP] Free memory: %" PRIu32 " bytes", esp_get_free_heap_size());
-    esp_mqtt_client_handle_t client = esp_mqtt_client_init(&mqtt_cfg);
+    mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    if(mqtt_client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize MQTT client");
+        return;
+    }
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
-    esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, app_mqtt_event_handler, NULL);
-    esp_mqtt_client_start(client);
+    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, app_mqtt_event_handler, NULL);
+    esp_mqtt_client_start(mqtt_client);
     ESP_ERROR_CHECK(app_event_loop_instance_register(APP_MQTT_EVENT, APP_MQTT_EVENT_PUBLISHED, app_mqtt_event_loop_handler, NULL, NULL));
     
 }

@@ -1,5 +1,6 @@
 idf_component_register(SRCS "main.c" 
                     "mfg_data.c"
+                    "provision_data.c"
                     "app_wifi.c" 
                     "app_mqtt.c"
                     "app_usb_hid.c"

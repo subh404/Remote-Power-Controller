@@ -15,6 +15,7 @@
 #include "app_fs.h"
 #include "app_event_loop.h"
 #include "app_pwr_sw.h"
+#include "provision_data.h"
 
 
 
@@ -61,6 +62,7 @@ void app_main(void)
     test_info();
     mfg_data_init();
     app_fs_init();
+    provision_data_init();
     app_event_loop_init();
     app_wifi_init();
     app_mqtt_init();

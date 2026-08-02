@@ -24,30 +24,18 @@ char *mfg_data_get_device_id(void)
 }
 char *mfg_data_get_ca_cert(void)
 {
-    if(ca_cert == NULL) {
-        return NULL;
-    }
     return ca_cert;
 }
 char *mfg_data_get_client_cert(void)
 {
-    if(client_cert == NULL) {
-        return NULL;
-    }
     return client_cert;
 }
 char *mfg_data_get_client_key(void)
 {
-    if(client_key == NULL) {
-        return NULL;
-    }
     return client_key;
 }
 char *mfg_data_get_server_uri(void)
 {
-    if(server_uri == NULL) {
-        return NULL;
-    }
     return server_uri;
 }
 

@@ -2,10 +2,11 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "nvs_flash.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#include "provision_data.h"
 
 #define EXAMPLE_ESP_WIFI_SSID      "wifi"
 #define EXAMPLE_ESP_WIFI_PASS      "wifi1234"
@@ -68,43 +69,22 @@ void app_wifi_init(void)
                                                         app_wifi_event_handler,
                                                         NULL,
                                                         NULL));
-                                                      
-    
-    nvs_handle_t my_handle;
-    esp_err_t err = nvs_open("storage", NVS_READONLY, &my_handle);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Error (%s) opening NVS handle!", esp_err_to_name(err));
-        goto failure;
+        
+    char* ssid = provision_data_get_ssid();
+    char* password = provision_data_get_password();
+    if(ssid != NULL && password != NULL) {                                                
+        strcpy((char *)wifi_config.sta.ssid, ssid);
+        strcpy((char *)wifi_config.sta.password, password);
     }
     else
     {
-        size_t ssid_len = sizeof(wifi_config.sta.ssid);
-        size_t password_len = sizeof(wifi_config.sta.password);
-        err = nvs_get_str(my_handle, "ssid", (char *)wifi_config.sta.ssid, &ssid_len);
-        wifi_config.sta.ssid[ssid_len] = '\0'; // Ensure null-termination
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Error (%s) reading SSID from NVS!", esp_err_to_name(err));
-            goto failure;
-        }
-        err = nvs_get_str(my_handle, "password", (char *)wifi_config.sta.password, &password_len);
-        wifi_config.sta.password[password_len] = '\0'; // Ensure null-termination
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Error (%s) reading password from NVS!", esp_err_to_name(err));
-            goto failure;
-        }
-        goto success_retrival;
+        ESP_LOGE(TAG, "SSID or password not found in provision data!");
+        strcpy((char *)wifi_config.sta.ssid, EXAMPLE_ESP_WIFI_SSID);
     }
 
-    failure:
-    strcpy((char *)wifi_config.sta.ssid, EXAMPLE_ESP_WIFI_SSID);
-    strcpy((char *)wifi_config.sta.password, EXAMPLE_ESP_WIFI_PASS);
-
-    success_retrival:
     /* TODO : Remove it in production */
     ESP_LOGI(TAG, "Connecting to WiFi SSID: %s", wifi_config.sta.ssid);
     ESP_LOGI(TAG, "Using WiFi Password: %s", wifi_config.sta.password);
-
-    nvs_close(my_handle);
     
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA_WPA2_PSK;
 
